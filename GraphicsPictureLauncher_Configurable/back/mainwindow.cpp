@@ -1,0 +1,352 @@
+/*
+ * 图片跑马灯模块，功能未完善。
+ * version 1.0
+ */
+
+#include "mainwindow.h"
+#include "ui_mainwindow.h"
+#include <QMainWindow>
+#include <pictrueitem.h>
+#include <pictruebutton.h>
+#include <pictrueview.h>
+#include <pictruewidget.h>
+#include <QGraphicsPixmapItem>
+#include <QGraphicsScene>
+#include <QTimer>
+#include <QPainterPath>
+#include <QGraphicsView>
+#include <QDebug>
+#include <QQueue>
+#include <QGraphicsItemAnimation>
+#include <QTimeLine>
+#include <cmath>
+#include <ctime>
+#include <QTransform>
+#include <QButtonGroup>
+
+//static int itemIdex = 0;
+//static int testIndex = 0;//调试用，可注释或删除
+static int dir = 0;//记录方向
+static QList<qreal> spaceList;
+static QList<qreal> unitList;
+static QList<qreal> transScaleList;//缩放比例表
+static QSize pictrueBigSize = RAW_VIEW_SIZE/SCALE_VIEW_PIXMAP;
+static QSize pictrueSmallSize = RAW_VIEW_SIZE/SCALE_VIEW_PIXMAP/SCALE_BIG_SMALL;
+static QList<PictrueItem *> itemList;
+static QList<int> finishList;
+
+using namespace Ui; 
+
+    Ui::MainWindow::MainWindow(QWidget* parent) :
+        QMainWindow(parent),
+        ui(new Ui::MainWindow),
+        m_timer(new QTimer(this)),
+        m_scene(new QGraphicsScene(this)),
+        m_index(0),
+        currentRule(RuleA),
+        m_rollCount(0),
+        btnMoveEnable(true)
+    {
+        ui->setupUi(this);
+        btnGroup = new QButtonGroup(this);
+        btnGroup->addButton(ui->picBtn0, 0);
+        btnGroup->addButton(ui->picBtn1, 1);
+        btnGroup->addButton(ui->picBtn2, 2);
+        btnGroup->addButton(ui->picBtn3, 3);
+        btnGroup->addButton(ui->picBtn4, 4);
+        btnGroup->addButton(ui->picBtn5, 5);
+        btnGroup->addButton(ui->picBtn6, 6);
+        btnGroup->addButton(ui->picBtn7, 7);
+        btnGroup->setExclusive(true);
+        btnGroup->button(MID_TYPE)->setChecked(true);
+        for (int i = 0; i < 8; i++)
+        {
+            static_cast<PictrueButton*>(btnGroup->button(i))->setId(i);
+        }
+#if 0
+        QGraphicsItem* item = new PictrueItem(QPixmap(":/picture/testPart/character0.png")
+            .scaled(300, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+        QTimeLine* timer = new QTimeLine(1000);
+        timer->setFrameRange(0, 60);
+        timer->setUpdateInterval(1);
+
+
+        QGraphicsScene* scene = new QGraphicsScene();
+        scene->setSceneRect(0, 0, 500, 500);
+        scene->addItem(item);
+
+        ui->graphicsView->setScene(scene);
+        ui->graphicsView->show();
+
+        connect(ui->goBtn, &QPushButton::clicked, timer, &QTimeLine::start);
+        //    connect(ui->goBtn,&QPushButton::clicked,[=]()
+        //    {
+        //        QTransform transf(item->transform());
+        //        transf.rotate(90.0/60.0,Qt::ZAxis);
+        //        item->setTransform(transf);
+        //        //scene->update();
+        //    });
+        static int previou;
+        static int current;
+        connect(timer, &QTimeLine::frameChanged, [=](int frame)
+            {
+                qDebug() << frame;
+                QTransform transf(item->transform());
+                current = frame;
+                for (int i = 0; i < current - previou; i++)
+                    transf.rotate(90.0 / 60.0, Qt::ZAxis);
+                previou = frame;
+                item->setTransform(transf);
+                //scene->update();
+            });
+        //timer->start();
+#else 
+        pointList << P1 << P2 << P3 << P4 << P5 << P6 << P7 << P8;
+        zValueList << 1 << 2 << 3 << 2 << 1 << 0 << 0 << 0;
+        pixmapScaleList << (qreal)1 << (qreal)1 << (qreal)1 << (qreal)1 << (qreal)1
+            << (qreal)1 / SCALE_BIG_SMALL << (qreal)1 / SCALE_BIG_SMALL << (qreal)1 / SCALE_BIG_SMALL;
+
+        ui->graphicsView->setStyleSheet("background: transparent; padding: 0px; border: 0px;");
+
+
+        ui->graphicsView->setScene(m_scene);
+        m_scene->setSceneRect(0, 0, RAW_VIEW_SIZE.width(), RAW_VIEW_SIZE.height());
+        midLine.setPoints(QPointF(0, RAW_VIEW_SIZE.height() / 2), \
+            QPointF(RAW_VIEW_SIZE.width(), RAW_VIEW_SIZE.height() / 2));
+
+        //添加图片
+        for (int i = 0; i < 8; i++)
+            pixmapList.append(QPixmap(QString(":/picture/testPart/character%1.png").arg(i)));
+
+        //图元添加图片
+        for (int i = 0; i < 8; i++)
+        {
+            itemList.append(new PictrueItem(pixmapList[i]
+                .scaled(pictrueBigSize, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+            ));
+            itemList[i]->setScale(pixmapScaleList[i]);
+            itemList[i]->setType(i);
+            itemList[i]->setItemId(i);
+            itemList[i]->setOffset(QPointF(0, 0));
+        }
+
+        for (int i = 0; i < 8; i++)
+        {
+            m_scene->addItem(itemList[i]);//添加图元
+            itemList[i]->setPos(midLine.pointAt(pointList[i]));//设置位置
+            itemList[i]->setZValue(zValueList[i]);//设置显示优先级
+            itemList[i]->setTransformationMode(Qt::SmoothTransformation);//设置缩放模式
+        }
+
+
+
+        //利用持续时间和帧数计算出定时时间,持续时间/（帧数*持续时间），这里乘1000是转为秒
+        m_timer->setInterval(DURATION_MS / (FPS * DURATION_MS / 1000));
+
+        connect(m_timer, &QTimer::timeout, this, &MainWindow::timerOutFunc);
+
+        //连接右按钮单机信号和处理函数
+        connect(ui->nextBtn, &QPushButton::clicked, this, &MainWindow::nextItem);
+
+        //连接左按钮单机信号和处理函数
+        connect(ui->previousBtn, &QPushButton::clicked, this, &MainWindow::previousItem);
+
+        //连接View大小改变信号和处理函数
+        connect(ui->graphicsView, &PictrueView::sizeChanged, [=](const QSize& size) {
+            //重新设置场景变换后的矩形
+            if (m_scene->isActive())
+                m_scene->setSceneRect(0, 0, size.width(), size.height());
+            //重新计算变换后的大小
+            pictrueBigSize = size / SCALE_VIEW_PIXMAP;
+            for (int i = 0; i < 8; i++)
+            {
+                itemList[i]->setPixmap(pixmapList[i].scaled(pictrueBigSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                //重新设置Line坐标
+                if (i == 0)
+                    midLine.setPoints(QPointF(0, \
+                        size.height() / 2 - itemList[i]->boundingRect().height() / 2), \
+                        QPointF(size.width() - itemList[i]->boundingRect().width(), \
+                            size.height() / 2 - itemList[i]->boundingRect().height() / 2));
+                //重新设置位置
+                itemList[i]->setPos(midLine.pointAt(pointList[i]));
+            }
+            });
+
+        for (int i = 0; i < 8; i++)
+        {
+            connect(itemList[i], &PictrueItem::clickedId, this, &MainWindow::clickedItemRoll);
+            void (PictrueButton:: * funcPtr)(int) = &PictrueButton::entered;
+            connect(static_cast<PictrueButton*>(btnGroup->button(i)), funcPtr, [this](int id)
+                {
+                    //            if(m_timer->isActive())
+                    //            {
+                    //                return;
+                    //            }
+                    int i = 0;
+                    while (id != itemList[i]->itemId()) {
+                        i++;
+                        if (i > 7)
+                        {
+                            qDebug() << "无匹配的单元的编号（id）。";
+                            return;
+                        }
+                    }
+                    btnMoveEnable = false;
+                    clickedItemRoll(itemList[i]->type());
+                    qDebug() << itemList[i]->type();
+                });
+        }
+#endif
+    }
+
+    Ui::MainWindow::~MainWindow()
+    {
+        delete ui;
+    }
+
+    int Ui::MainWindow::getIndexByRules(int oldIndex, int rule)
+    {
+        switch (rule) {
+        case 1:
+            return (oldIndex + 1) % 8;
+        case -1:
+            return oldIndex == 0 ? 7 : oldIndex - 1;
+        default:
+            return 0;
+        }
+    }
+
+    void Ui::MainWindow::timerOutFunc()
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            if (qAbs(midLine.pointAt(pointList[getIndexByRules(i, dir)]).x() - itemList[i]->pos().x()) < qAbs(unitList[i]))
+            {
+                if (finishList.contains(i))
+                    continue;
+                itemList[i]->setPos(midLine.pointAt(pointList[getIndexByRules(i, dir)]));
+                //设置新的显示优先级
+                itemList[i]->setScale(pixmapScaleList[getIndexByRules(i, dir)]);
+                //设置新的类型
+                itemList[i]->setType(getIndexByRules(i, dir));
+                //i==7-->最后一个图元移动完成
+                finishList.append(i);
+                if (finishList.size() == 8)
+                {
+                    //循环旋转图元表和图片表
+                    rollList(itemList, dir, 1);
+                    rollList(pixmapList, dir, 1);
+                    for (int i = 0; i < 8; i++)
+                        itemList[i]->setZValue(zValueList[i]);
+                    m_timer->stop();
+                    finishList.clear();
+                    if (btnGroup->checkedId() != itemList[MID_TYPE]->itemId() && btnMoveEnable)
+                        btnGroup->button(getIndexByRules(btnGroup->checkedId(), -dir))->setChecked(true);
+                    if (--m_rollCount)
+                    {
+                        rollItem(dir, m_rollCount);
+                    }
+                    if (m_rollCount == 0)
+                        btnMoveEnable = true;
+                    break;
+                }
+            }
+            else
+            {
+                //按计算好的移动单位移动一次
+                itemList[i]->setPos(QPointF(itemList[i]->pos().x() + unitList[i], itemList[i]->pos().y()));
+                //转换因子不是1.0时进行转换设置
+                if (transScaleList[i] != (qreal)1.0)
+                {
+                    itemList[i]->setScale(itemList[i]->scale() * transScaleList[i]);
+                }
+            }
+            m_scene->invalidate();
+        }
+    }
+
+    void Ui::MainWindow::rollItem(int rollDir, unsigned rollCount)
+    {
+        if (m_timer->isActive())
+            return;
+        //清除之前的空间差列表和移动单位列表
+        m_rollCount = rollCount;
+        spaceList.clear();
+        unitList.clear();
+        transScaleList.clear();
+        dir = rollDir;
+        qDebug() << "rollCount" << rollCount;
+        for (int i = 0; i < 8; i++)
+        {
+            spaceList.append(midLine.pointAt(pointList[getIndexByRules(i, dir)]).x() - itemList[i]->pos().x());//计算移动总距离
+            unitList.append(spaceList[i] / (FPS * DURATION_MS / 1000));//计算移动单个距离
+            transScaleList.append(pow(pixmapScaleList[getIndexByRules(i, dir)] / pixmapScaleList[i], \
+                (qreal)1 / (FPS * DURATION_MS / 1000)));//计算增长倍数
+        }
+
+        //启动定时器
+        m_timer->start();
+
+    }
+
+    void Ui::MainWindow::nextItem()
+    {
+        rollItem(1, 1);
+    }
+
+    void Ui::MainWindow::previousItem()
+    {
+        rollItem(-1, 1);
+    }
+
+    void Ui::MainWindow::clickedItemRoll(int type)
+    {
+        if (m_timer->isActive())
+            return;
+        //如果点击的图片处于中间，则返回
+        //int midType = itemList[MID_TYPE]->type();
+        int ret = MID_TYPE - type;
+        switch (ret) {
+        case 0:
+            return;
+            break;
+        case 1:
+        case 2:
+            dir = 1;
+            m_rollCount = ret;
+            rollItem(dir, m_rollCount);
+            break;
+        case -1:
+        case -2:
+        case -3:
+        case -4:
+        case -5:
+            dir = -1;
+            m_rollCount = -ret;
+            rollItem(dir, m_rollCount);
+            break;
+        default:
+            return;
+            break;
+        }
+    }
+
+    template<typename T>
+    void Ui::MainWindow::rollList(QList<T>& oldList, int dir, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (dir == 1)
+            {
+                oldList.prepend(oldList.last());
+                oldList.removeLast();
+            }
+            else if (dir == -1)
+            {
+                oldList.append(oldList.first());
+                oldList.removeFirst();
+            }
+        }
+    }
+
